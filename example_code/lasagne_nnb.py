@@ -1,13 +1,11 @@
 from __future__ import print_function
-import sys
-sys.path.append('../.~/theano')
 import numpy as np
 import datetime
 import csv
-# from lasagne.layers import InputLayer, DropoutLayer, DenseLayer
-# from lasagne.updates import nesterov_momentum
-# from lasagne.objectives import binary_crossentropy
-# from nolearn.lasagne import NeuralNet
+from lasagne.layers import InputLayer, DropoutLayer, DenseLayer
+from lasagne.updates import nesterov_momentum
+from lasagne.objectives import binary_crossentropy
+from nolearn.lasagne import NeuralNet
 import theano
 from theano import tensor as T
 from theano.tensor.nnet import sigmoid
@@ -54,7 +52,7 @@ def impute_missing_weather_station_values(weather):
     
 def load_weather():
     weather = {}
-    for line in csv.DictReader(open("../input/weather.csv")):
+    for line in csv.DictReader(open("Mono/data/weather.csv")):
         for name, converter in {"Date" : date,
                                 "Tmax" : float,"Tmin" : float,"Tavg" : float,
                                 "DewPoint" : float, "WetBulb" : float,
@@ -77,7 +75,7 @@ def load_weather():
     
 def load_training():
     training = []
-    for line in csv.DictReader(open("../input/train.csv")):
+    for line in csv.DictReader(open("Mono/data/train.csv")):
         for name, converter in {"Date" : date, 
                                 "Latitude" : float, "Longitude" : float,
                                 "NumMosquitos" : int, "WnvPresent" : int}.items():
@@ -87,7 +85,7 @@ def load_training():
     
 def load_testing():
     training = []
-    for line in csv.DictReader(open("../input/test.csv")):
+    for line in csv.DictReader(open("Mono/data/test.csv")):
         for name, converter in {"Date" : date, 
                                 "Latitude" : float, "Longitude" : float}.items():
             line[name] = converter(line[name])

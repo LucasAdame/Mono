@@ -1,0 +1,10 @@
+# OS related
+.DS_Store
+
+# VSCode related
+.vscode
+
+# Python related
+__pycache__/
+venv/
+.env
