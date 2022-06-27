@@ -1,21 +1,30 @@
-from __future__ import print_function
-import sys
-sys.path.append('../.~/theano')
 import numpy as np
-import datetime
 import csv
-# from lasagne.layers import InputLayer, DropoutLayer, DenseLayer
-# from lasagne.updates import nesterov_momentum
-# from lasagne.objectives import binary_crossentropy
-# from nolearn.lasagne import NeuralNet
-import theano
-from theano import tensor as T
-from theano.tensor.nnet import sigmoid
+from keras.models import Sequential
+from keras.layers.core import Dense, Dropout, Activation
+from keras.utils import np_utils
 from sklearn import metrics
-from sklearn.utils import shuffle
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
+from utils import load_testing, load_training, load_weather, assemble_X, assemble_y, normalize
 
+# let's define some utils
 
-species_map = {'CULEX RESTUANS' : "100000",
+def get_weather_data():
+    weather_dic = {}
+    fi = csv.reader(open("input/weather.csv"))
+    weather_head = fi.__next__()
+    for line in fi:
+        if line[0] == '1':
+            continue
+        weather_dic[line[1]] = line
+    weather_indexes = dict([(weather_head[i], i) for i in range(len(weather_head))])
+    return weather_dic, weather_indexes
+
+def process_line(line, indexes, weather_dic, weather_indexes):
+    def get(name):
+        return line[indexes[name]]
+    species_map = {'CULEX RESTUANS' : "100000",
               'CULEX TERRITANS' : "010000", 
               'CULEX PIPIENS'   : "001000", 
               'CULEX PIPIENS/RESTUANS' : "101000", 
@@ -23,225 +32,132 @@ species_map = {'CULEX RESTUANS' : "100000",
               'CULEX SALINARIUS': "000010", 
               'CULEX TARSALIS' :  "000001",
               'UNSPECIFIED CULEX': "001000"} # Treating unspecified as PIPIENS (http://www.ajtmh.org/content/80/2/268.full)
+    date = get("Date")
+    month = float(date.split('-')[1])
+    week = int(date.split('-')[1]) * 4 + int(date.split('-')[2]) / 7
+    latitude = float(get("Latitude"))
+    longitude = float(get("Longitude"))
+    tmax = float(weather_dic[date][weather_indexes["Tmax"]])
+    tmin = float(weather_dic[date][weather_indexes["Tmin"]])
+    tavg = float(weather_dic[date][weather_indexes["Tavg"]])
+    dewpoint = float(weather_dic[date][weather_indexes["DewPoint"]])
+    wetbulb = float(weather_dic[date][weather_indexes["WetBulb"]])
+    pressure = float(weather_dic[date][weather_indexes["StnPressure"]])
+    species = species_map[str(get("Species"))]
+    #adicinar cada espécie como uma variável boolean?
+    return [month, week, latitude, longitude, tmax, tmin, tavg, dewpoint, wetbulb]#, species]#, dewpoint, avgspeed]
 
-def date(text):
-    return datetime.datetime.strptime(text, "%Y-%m-%d").date()
-    
-def precip(text):
-    TRACE = 1e-3
-    text = text.strip()
-    if text == "M":
-        return None
-    if text == "-":
-        return None
-    if text == "T":
-        return TRACE
-    return float(text)
+def preprocess_data(X, scaler=None):
+    if not scaler:
+        scaler = StandardScaler()
+        scaler.fit(X)
+    X = scaler.transform(X)
+    return X, scaler
 
-def impute_missing_weather_station_values(weather):
-    # Stupid simple
-    for k, v in weather.items():
-        if v[0] is None:
-            v[0] = v[1]
-        elif v[1] is None:
-            v[1] = v[0]
-        for k1 in v[0]:
-            if v[0][k1] is None:
-                v[0][k1] = v[1][k1]
-        for k1 in v[1]:
-            if v[1][k1] is None:
-                v[1][k1] = v[0][k1]
-    
-def load_weather():
-    weather = {}
-    for line in csv.DictReader(open("../input/weather.csv")):
-        for name, converter in {"Date" : date,
-                                "Tmax" : float,"Tmin" : float,"Tavg" : float,
-                                "DewPoint" : float, "WetBulb" : float,
-                                "PrecipTotal" : precip,"Sunrise" : precip,"Sunset" : precip,
-                                "Depart" : float, "Heat" : precip,"Cool" : precip,
-                                "ResultSpeed" : float,"ResultDir" : float,"AvgSpeed" : float,
-                                "StnPressure" : float, "SeaLevel" : float}.items():
-            x = line[name].strip()
-            line[name] = converter(x) if (x != "M") else None
-        station = int(line["Station"]) - 1
-        assert station in [0,1]
-        dt = line["Date"]
-        if dt not in weather:
-            weather[dt] = [None, None]
-        assert weather[dt][station] is None, "duplicate weather reading {0}:{1}".format(dt, station)
-        weather[dt][station] = line
-    impute_missing_weather_station_values(weather)        
-    return weather
-    
-    
-def load_training():
-    training = []
-    for line in csv.DictReader(open("../input/train.csv")):
-        for name, converter in {"Date" : date, 
-                                "Latitude" : float, "Longitude" : float,
-                                "NumMosquitos" : int, "WnvPresent" : int}.items():
-            line[name] = converter(line[name])
-        training.append(line)
-    return training
-    
-def load_testing():
-    training = []
-    for line in csv.DictReader(open("../input/test.csv")):
-        for name, converter in {"Date" : date, 
-                                "Latitude" : float, "Longitude" : float}.items():
-            line[name] = converter(line[name])
-        training.append(line)
-    return training
-    
-    
-def closest_station(lat, longi):
-    # Chicago is small enough that we can treat coordinates as rectangular.
-    stations = np.array([[41.995, -87.933],
-                         [41.786, -87.752]])
-    loc = np.array([lat, longi])
-    deltas = stations - loc[None, :]
-    dist2 = (deltas**2).sum(1)
-    return np.argmin(dist2)
-       
-def normalize(X, mean=None, std=None):
-    count = X.shape[1]
-    if mean is None:
-        mean = np.nanmean(X, axis=0)
-    for i in range(count):
-        X[np.isnan(X[:,i]), i] = mean[i]
-    if std is None:
-        std = np.std(X, axis=0)
-    for i in range(count):
-        X[:,i] = (X[:,i] - mean[i]) / std[i]
-    return mean, std
-    
-def scaled_count(record):
-    SCALE = 9.0
-    if "NumMosquitos" not in record:
-        # This is test data
-        return 1
-    return int(np.ceil(record["NumMosquitos"] / SCALE))
-    
-    
-def assemble_X(base, weather):
-    X = []
-    for b in base:
-        date = b["Date"]
-        lat, longi = b["Latitude"], b["Longitude"]
-        case = [date.year, date.month, date.day, date.weekday(), lat, longi]
-        # Look at a selection of past weather values
-        for days_ago in [0,1,3,5,8,12]:
-            day = date - datetime.timedelta(days=days_ago)
-            for obs in ["Tmax","Tmin","Tavg","DewPoint","WetBulb","PrecipTotal","Depart","Sunrise","Sunset","Cool","ResultSpeed","ResultDir"]:
-                station = closest_station(lat, longi)
-                case.append(weather[day][station][obs])
-        # Specify which mosquitos are present
-        species_vector = [float(x) for x in species_map[b["Species"]]]
-        case.extend(species_vector)
-        # Weight each observation by the number of mosquitos seen. Test data
-        # Doesn't have this column, so in that case use 1. This accidentally
-        # Takes into account multiple entries that result from >50 mosquitos
-        # on one day. 
-        for repeat in range(scaled_count(b)):
-            X.append(case)    
-    X = np.asarray(X, dtype=np.float32)
-    return X
-    
-def assemble_y(base):
-    y = []
-    for b in base:
-        present = b["WnvPresent"]
-        for repeat in range(scaled_count(b)):
-            y.append(present)    
-    return np.asarray(y, dtype=np.int32).reshape(-1,1)
+def shuffle(X, y, seed=1337):
+    np.random.seed(seed)
+    shuffle = np.arange(len(y))
+    np.random.shuffle(shuffle)
+    X = X[shuffle]
+    y = y[shuffle]
+    return X, y
+
+def build_model(input_dim, output_dim):
+    model = Sequential()
+    model.add(Dense(input_dim))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.5))
+
+    model.add(Dense(400))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.5))
+
+    model.add(Dense(200))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.5))
+
+    model.add(Dense(output_dim))
+    model.add(Activation('softmax'))
+
+    model.compile(loss='categorical_crossentropy', optimizer="adam")
+    return model
 
 
-class AdjustVariable(object):
-    def __init__(self, variable, target, half_life=20):
-        self.variable = variable
-        self.target = target
-        self.half_life = half_life
-    def __call__(self, nn, train_history):
-        delta = self.variable.get_value() - self.target
-        delta /= 2**(1.0/self.half_life)
-        self.variable.set_value(np.float32(self.target + delta))
+# now the actual script
 
-def train():
-    weather = load_weather()
-    training = load_training()
-    
-    X = assemble_X(training, weather)
-    mean, std = normalize(X)
-    y = assemble_y(training)
-        
-    input_size = len(X[0])
-    
-    learning_rate = theano.shared(np.float32(0.1))
-    
-    net = NeuralNet(
-    layers=[  
-        ('input', InputLayer),
-         ('hidden1', DenseLayer),
-        ('dropout1', DropoutLayer),
-        ('hidden2', DenseLayer),
-        ('dropout2', DropoutLayer),
-        ('output', DenseLayer),
-        ],
-    # layer parameters:
-    input_shape=(None, input_size), 
-    hidden1_num_units=400, 
-    dropout1_p=0.4,
-    hidden2_num_units=200, 
-    dropout2_p=0.4,
-    output_nonlinearity=sigmoid, 
-    output_num_units=1, 
+print("Processing training data...")
 
-    # optimization method:
-    update=nesterov_momentum,
-    update_learning_rate=learning_rate,
-    update_momentum=0.9,
-    
-    # Decay the learning rate
-    on_epoch_finished=[
-            AdjustVariable(learning_rate, target=0, half_life=4),
-            ],
+rows = []
+labels = []
+fi = csv.reader(open("input/train.csv"))
+head = fi.__next__()
+indexes = dict([(head[i], i) for i in range(len(head))])
+weather_dic, weather_indexes = get_weather_data()
+for line in fi:
+    rows.append(process_line(line, indexes, weather_dic, weather_indexes))
+    labels.append(float(line[indexes["WnvPresent"]]))
 
-    # This is silly, but we don't want a stratified K-Fold here
-    # To compensate we need to pass in the y_tensor_type and the loss.
-    regression=True,
-    y_tensor_type = T.imatrix,
-    objective_loss_function = binary_crossentropy,
-     
-    max_epochs=60, 
-    eval_size=0.1,
-    verbose=1,
-    )
+X = np.array(rows)
+y = np.array(labels)
+X, y = shuffle(X, y)
+X, scaler = preprocess_data(X)
+Y = np_utils.to_categorical(y)
+input_dim = X.shape[1]
+output_dim = 2
 
-    X, y = shuffle(X, y, random_state=123)
-    net.fit(X, y)
-    
-    _, X_valid, _, y_valid = net.train_test_split(X, y, net.eval_size)
-    probas = net.predict_proba(X_valid)[:,0]
-    print("ROC score", metrics.roc_auc_score(y_valid, probas))
+print("Validation...")
 
-    return net, mean, std     
-    
+nb_folds = 4
+kfolds = KFold(nb_folds)
+av_roc = 0.
+f = 0
+for train, valid in kfolds.split(X):
+    print('---'*20)
+    print('Fold', f)
+    print('---'*20)
+    f += 1
+    X_train = X[train]
+    X_valid = X[valid]
+    Y_train = Y[train]
+    Y_valid = Y[valid]
+    y_valid = y[valid]
 
-def submit(net, mean, std):
-    weather = load_weather()
-    testing = load_testing()
-    X = assemble_X(testing, weather) 
-    normalize(X, mean, std)
-    predictions = net.predict_proba(X)[:,0]    
-    #
-    out = csv.writer(open("submission.csv", "w"))
-    out.writerow(["Id","WnvPresent"])
-    for row, p in zip(testing, predictions):
-        out.writerow([row["Id"], p])
+    print("Building model...")
+    model = build_model(input_dim, output_dim)
 
+    print("Training model...")
 
-if __name__ == "__main__":
-    net, mean, std = train()
-    print(net, mean, std)
-    # submit(net, mean, std)
+    model.fit(X_train, Y_train, epochs=100, batch_size=16, validation_data=(X_valid, Y_valid), verbose=0)
+    valid_preds = model.predict(X_valid, verbose=0)
+    # import ipdb
+    # ipdb.set_trace()
+    valid_preds = valid_preds[:, 1] # 1 is the probability to be infected
+    roc = metrics.roc_auc_score(y_valid, valid_preds)
+    print("ROC:", roc)
+    av_roc += roc
+
+print('Average ROC:', av_roc/nb_folds)
+
+print("Generating submission...")
+
+model = build_model(input_dim, output_dim)
+model.fit(X, Y, epochs=100, batch_size=16, verbose=0)
+
+fi = csv.reader(open("input/test.csv"))
+head = fi.__next__()
+indexes = dict([(head[i], i) for i in range(len(head))])
+rows = []
+ids = []
+for line in fi:
+    rows.append(process_line(line, indexes, weather_dic, weather_indexes))
+    ids.append(line[0])
+X_test = np.array(rows)
+X_test, _ = preprocess_data(X_test, scaler)
+
+preds = model.predict(X_test, verbose=0)
+preds = preds[:,1]
+fo = csv.writer(open("keras-nn.csv", "w"), lineterminator="\n")
+fo.writerow(["Id","WnvPresent"])
+
+for i, item in enumerate(ids):
+    fo.writerow([ids[i], preds[i]])

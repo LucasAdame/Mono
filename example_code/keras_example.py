@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 
 def get_weather_data():
     weather_dic = {}
-    fi = csv.reader(open("../input/weather.csv"))
+    fi = csv.reader(open("input/weather.csv"))
     weather_head = fi.__next__()
     for line in fi:
         if line[0] == '1':
@@ -66,9 +66,9 @@ def build_model(input_dim, output_dim):
     model.add(Activation('relu'))
     model.add(Dropout(0.5))
 
-    model.add(Dense(32))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
+    # model.add(Dense(32))
+    # model.add(Activation('relu'))
+    # model.add(Dropout(0.5))
 
     model.add(Dense(output_dim))
     model.add(Activation('softmax'))
@@ -83,7 +83,7 @@ print("Processing training data...")
 
 rows = []
 labels = []
-fi = csv.reader(open("../input/train.csv"))
+fi = csv.reader(open("input/train.csv"))
 head = fi.__next__()
 indexes = dict([(head[i], i) for i in range(len(head))])
 weather_dic, weather_indexes = get_weather_data()
@@ -93,7 +93,8 @@ for line in fi:
 
 X = np.array(rows)
 y = np.array(labels)
-
+# import ipdb
+# ipdb.set_trace()
 X, y = shuffle(X, y)
 X, scaler = preprocess_data(X)
 Y = np_utils.to_categorical(y)
@@ -124,7 +125,7 @@ for train, valid in kfolds.split(X):
     print("Training model...")
 
     model.fit(X_train, Y_train, epochs=100, batch_size=16, validation_data=(X_valid, Y_valid), verbose=0)
-    valid_preds = model.predict_proba(X_valid, verbose=0)
+    valid_preds = model.predict(X_valid, verbose=0)
     valid_preds = valid_preds[:, 1]
     roc = metrics.roc_auc_score(y_valid, valid_preds)
     print("ROC:", roc)
@@ -135,9 +136,9 @@ print('Average ROC:', av_roc/nb_folds)
 print("Generating submission...")
 
 model = build_model(input_dim, output_dim)
-model.fit(X, Y, nb_epoch=100, batch_size=16, verbose=0)
+model.fit(X, Y, epochs=100, batch_size=16, verbose=0)
 
-fi = csv.reader(open("../input/test.csv"))
+fi = csv.reader(open("input/test.csv"))
 head = fi.__next__()
 indexes = dict([(head[i], i) for i in range(len(head))])
 rows = []
@@ -148,7 +149,7 @@ for line in fi:
 X_test = np.array(rows)
 X_test, _ = preprocess_data(X_test, scaler)
 
-preds = model.predict_proba(X_test, verbose=0)
+preds = model.predict(X_test, verbose=0)
 
 fo = csv.writer(open("keras-nn.csv", "w"), lineterminator="\n")
 fo.writerow(["Id","WnvPresent"])
