@@ -6,9 +6,6 @@ from keras.utils import np_utils
 from sklearn import metrics
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
-from utils import load_testing, load_training, load_weather, assemble_X, assemble_y, normalize
-
-# let's define some utils
 
 def get_weather_data():
     weather_dic = {}
