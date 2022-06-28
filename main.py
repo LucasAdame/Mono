@@ -164,7 +164,7 @@ X_test, _ = preprocess_data(X_test, scaler)
 
 preds = model.predict(X_test, verbose=0)
 preds = preds[:,1]
-fo = csv.writer(open("keras-nn.csv", "w"), lineterminator="\n")
+fo = csv.writer(open("output.csv", "w"), lineterminator="\n")
 fo.writerow(["Id","WnvPresent"])
 
 for i, item in enumerate(ids):
