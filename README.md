@@ -24,8 +24,7 @@ python -m venv venv
 source venv/bin/activate
 pip install --upgrade pip && pip install -r requirements.txt
 ```
-
-#### Run code from code_examples folder:
+#### Run main.py:
 ```
-cd Mono/code_examples
+python main.py
 ```
