@@ -6,9 +6,6 @@ from keras.utils import np_utils
 from sklearn import metrics
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
-from utils import load_testing, load_training, load_weather, assemble_X, assemble_y, normalize
-
-# let's define some utils
 
 def get_weather_data():
     weather_dic = {}
@@ -24,14 +21,14 @@ def get_weather_data():
 def process_line(line, indexes, weather_dic, weather_indexes):
     def get(name):
         return line[indexes[name]]
-    species_map = {'CULEX RESTUANS' : "100000",
-              'CULEX TERRITANS' : "010000", 
-              'CULEX PIPIENS'   : "001000", 
-              'CULEX PIPIENS/RESTUANS' : "101000", 
-              'CULEX ERRATICUS' : "000100", 
-              'CULEX SALINARIUS': "000010", 
-              'CULEX TARSALIS' :  "000001",
-              'UNSPECIFIED CULEX': "001000"} # Treating unspecified as PIPIENS (http://www.ajtmh.org/content/80/2/268.full)
+    species_map = {'CULEX RESTUANS' : 0,
+              'CULEX TERRITANS' :0, 
+              'CULEX PIPIENS'   : 0, 
+              'CULEX PIPIENS/RESTUANS' : 0, 
+              'CULEX ERRATICUS' : 0, 
+              'CULEX SALINARIUS': 0, 
+              'CULEX TARSALIS' :  0,
+              'UNSPECIFIED CULEX': 0} 
     date = get("Date")
     month = float(date.split('-')[1])
     week = int(date.split('-')[1]) * 4 + int(date.split('-')[2]) / 7
@@ -40,12 +37,17 @@ def process_line(line, indexes, weather_dic, weather_indexes):
     tmax = float(weather_dic[date][weather_indexes["Tmax"]])
     tmin = float(weather_dic[date][weather_indexes["Tmin"]])
     tavg = float(weather_dic[date][weather_indexes["Tavg"]])
-    dewpoint = float(weather_dic[date][weather_indexes["DewPoint"]])
     wetbulb = float(weather_dic[date][weather_indexes["WetBulb"]])
-    pressure = float(weather_dic[date][weather_indexes["StnPressure"]])
-    species = species_map[str(get("Species"))]
-    #adicinar cada espécie como uma variável boolean?
-    return [month, week, latitude, longitude, tmax, tmin, tavg, dewpoint, wetbulb]#, species]#, dewpoint, avgspeed]
+    species_map[str(get("Species"))] = 1
+    restuans = species_map['CULEX RESTUANS']
+    territans = species_map['CULEX TERRITANS']
+    pipiens = max(species_map['CULEX PIPIENS'], species_map['UNSPECIFIED CULEX'])# Treating unspecified as PIPIENS(hack) (http://www.ajtmh.org/content/80/2/268.full)
+    pip_rest = species_map['CULEX PIPIENS/RESTUANS']
+    errat = species_map['CULEX ERRATICUS']
+    salin = species_map['CULEX SALINARIUS']
+    tarsalis = species_map['CULEX TARSALIS']
+
+    return [month, week, latitude, longitude, tmax, tmin, tavg,  wetbulb, restuans, territans, pipiens, pip_rest,errat,salin,tarsalis]
 
 def preprocess_data(X, scaler=None):
     if not scaler:
@@ -82,7 +84,10 @@ def build_model(input_dim, output_dim):
     model.compile(loss='categorical_crossentropy', optimizer="adam")
     return model
 
-
+def scaled_count(record):
+    SCALE = 9.0
+    num_mosquitos = int(record[10])
+    return int(np.ceil(num_mosquitos / SCALE))
 # now the actual script
 
 print("Processing training data...")
@@ -93,10 +98,11 @@ fi = csv.reader(open("input/train.csv"))
 head = fi.__next__()
 indexes = dict([(head[i], i) for i in range(len(head))])
 weather_dic, weather_indexes = get_weather_data()
-for line in fi:
-    rows.append(process_line(line, indexes, weather_dic, weather_indexes))
-    labels.append(float(line[indexes["WnvPresent"]]))
 
+for line in fi:
+    for repeat in range(scaled_count(line)):
+        rows.append(process_line(line, indexes, weather_dic, weather_indexes))
+        labels.append(float(line[indexes["WnvPresent"]]))
 X = np.array(rows)
 y = np.array(labels)
 X, y = shuffle(X, y)
@@ -127,10 +133,8 @@ for train, valid in kfolds.split(X):
 
     print("Training model...")
 
-    model.fit(X_train, Y_train, epochs=100, batch_size=16, validation_data=(X_valid, Y_valid), verbose=0)
+    model.fit(X_train, Y_train, epochs=50, batch_size=16, validation_data=(X_valid, Y_valid), verbose=0)
     valid_preds = model.predict(X_valid, verbose=0)
-    # import ipdb
-    # ipdb.set_trace()
     valid_preds = valid_preds[:, 1] # 1 is the probability to be infected
     roc = metrics.roc_auc_score(y_valid, valid_preds)
     print("ROC:", roc)
@@ -141,7 +145,7 @@ print('Average ROC:', av_roc/nb_folds)
 print("Generating submission...")
 
 model = build_model(input_dim, output_dim)
-model.fit(X, Y, epochs=100, batch_size=16, verbose=0)
+model.fit(X, Y, epochs=50, batch_size=16, verbose=0)
 
 fi = csv.reader(open("input/test.csv"))
 head = fi.__next__()
@@ -156,7 +160,7 @@ X_test, _ = preprocess_data(X_test, scaler)
 
 preds = model.predict(X_test, verbose=0)
 preds = preds[:,1]
-fo = csv.writer(open("keras-nn.csv", "w"), lineterminator="\n")
+fo = csv.writer(open("output.csv", "w"), lineterminator="\n")
 fo.writerow(["Id","WnvPresent"])
 
 for i, item in enumerate(ids):
