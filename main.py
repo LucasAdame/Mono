@@ -37,19 +37,17 @@ def process_line(line, indexes, weather_dic, weather_indexes):
     tmax = float(weather_dic[date][weather_indexes["Tmax"]])
     tmin = float(weather_dic[date][weather_indexes["Tmin"]])
     tavg = float(weather_dic[date][weather_indexes["Tavg"]])
-    dewpoint = float(weather_dic[date][weather_indexes["DewPoint"]])
     wetbulb = float(weather_dic[date][weather_indexes["WetBulb"]])
-    pressure = float(weather_dic[date][weather_indexes["StnPressure"]])
     species_map[str(get("Species"))] = 1
     restuans = species_map['CULEX RESTUANS']
     territans = species_map['CULEX TERRITANS']
-    pipiens = max(species_map['CULEX PIPIENS'], species_map['UNSPECIFIED CULEX'])# Treating unspecified as PIPIENS (http://www.ajtmh.org/content/80/2/268.full)
+    pipiens = max(species_map['CULEX PIPIENS'], species_map['UNSPECIFIED CULEX'])# Treating unspecified as PIPIENS(hack) (http://www.ajtmh.org/content/80/2/268.full)
     pip_rest = species_map['CULEX PIPIENS/RESTUANS']
     errat = species_map['CULEX ERRATICUS']
     salin = species_map['CULEX SALINARIUS']
     tarsalis = species_map['CULEX TARSALIS']
-    #adicinar cada espécie como uma variável boolean?
-    return [month, week, latitude, longitude, tmax, tmin, tavg, dewpoint, wetbulb, restuans, territans, pipiens, pip_rest,errat,salin,tarsalis]#, species]#, dewpoint, avgspeed]
+
+    return [month, week, latitude, longitude, tmax, tmin, tavg,  wetbulb, restuans, territans, pipiens, pip_rest,errat,salin,tarsalis]
 
 def preprocess_data(X, scaler=None):
     if not scaler:
@@ -135,10 +133,8 @@ for train, valid in kfolds.split(X):
 
     print("Training model...")
 
-    model.fit(X_train, Y_train, epochs=100, batch_size=16, validation_data=(X_valid, Y_valid), verbose=0)
+    model.fit(X_train, Y_train, epochs=50, batch_size=16, validation_data=(X_valid, Y_valid), verbose=0)
     valid_preds = model.predict(X_valid, verbose=0)
-    # import ipdb
-    # ipdb.set_trace()
     valid_preds = valid_preds[:, 1] # 1 is the probability to be infected
     roc = metrics.roc_auc_score(y_valid, valid_preds)
     print("ROC:", roc)
@@ -149,7 +145,7 @@ print('Average ROC:', av_roc/nb_folds)
 print("Generating submission...")
 
 model = build_model(input_dim, output_dim)
-model.fit(X, Y, epochs=100, batch_size=16, verbose=0)
+model.fit(X, Y, epochs=50, batch_size=16, verbose=0)
 
 fi = csv.reader(open("input/test.csv"))
 head = fi.__next__()
